@@ -59,7 +59,7 @@ async function run() {
     app.post('/books', async (req, res) => {
       try {
         const newBook = req.body; // Expects layout: { title, imgUrl, email }
-
+// const uri = "mongodb+srv://sussynerd7:<db_password>@cluster0.07firde.mongodb.net/?appName=Cluster0";
         // Basic structural validation
         if (!newBook.title || !newBook.imgUrl || !newBook.email) {
           return res.status(400).send({ 
