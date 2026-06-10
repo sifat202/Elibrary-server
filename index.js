@@ -11,8 +11,14 @@ const app = express();
 const port = process.env.PORT || 5000;
 
 // ✅ Bulletproof Manual CORS Middleware for Vercel
-app.use(cors({ origin: 'https://elibrary-d76cc.web.app' })); 
-
+// ✅ Bulletproof Manual CORS Middleware allowing multiple origins
+app.use(cors({ 
+  origin: [
+    'https://elibrary-d76cc.web.app', // Your production frontend
+    'http://localhost:5173'           // Your local Vite development frontend
+  ] 
+}));
+//how to add another second origin like ,'http://localhost:5173'
 app.use(express.json());
 
 const uri = process.env.PASSWORD_DB;
