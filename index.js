@@ -13,9 +13,6 @@ const port = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-// ======================
-// MongoDB Setup
-// ======================
 const uri = process.env.PASSWORD_DB;
 
 if (!uri) {
@@ -31,9 +28,6 @@ const client = new MongoClient(uri, {
   }
 });
 
-// ======================
-// EMAIL TRANSPORTER
-// ======================
 let transporter;
 
 const setupTransporter = async () => {
@@ -60,113 +54,114 @@ const setupTransporter = async () => {
   }
 };
 
-// ======================
-// MAIN APP
-// ======================
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+const formatDate = (date) =>
+  date.toLocaleString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+const sendMail = async (to, subject, html) => {
+  if (!transporter) return;
+  try {
+    await transporter.sendMail({
+      from: '"E-Library 📚" <noreply@elibrary.com>',
+      to,
+      subject,
+      html,
+    });
+    console.log(`📧 Email sent to ${to}`);
+  } catch (e) {
+    console.error(`❌ Email to ${to} failed:`, e.message);
+  }
+};
+
+// ─── main ────────────────────────────────────────────────────────────────────
+
 async function run() {
   try {
     await client.connect();
     await client.db("admin").command({ ping: 1 });
-
     console.log("🚀 MongoDB connected");
 
     await setupTransporter();
 
     const db = client.db("Elibrary");
-    const booksCollection = db.collection("Books");
+    const booksCollection  = db.collection("Books");
     const borrowsCollection = db.collection("Borrows");
-    const alertsCollection = db.collection("Alerts");
+    const alertsCollection  = db.collection("Alerts");
 
-    // ======================
-    // GET ALL BOOKS (RESTORED)
-    // ======================
+    // ── GET ALL BOOKS ──────────────────────────────────────────────────────
     app.get('/books', async (req, res) => {
       try {
         const books = await booksCollection.find().toArray();
         res.send(books);
-      } catch (err) {
+      } catch {
         res.status(500).send({ message: "Failed to fetch books" });
       }
     });
 
-    // ======================
-    // GET SINGLE BOOK
-    // ======================
+    // ── GET SINGLE BOOK ────────────────────────────────────────────────────
     app.get('/books/:id', async (req, res) => {
       try {
         const id = req.params.id;
-
-        if (!ObjectId.isValid(id)) {
-          return res.status(400).send({ message: "Invalid ID" });
-        }
+        if (!ObjectId.isValid(id)) return res.status(400).send({ message: "Invalid ID" });
 
         const book = await booksCollection.findOne({ _id: new ObjectId(id) });
-
-        if (!book) {
-          return res.status(404).send({ message: "Book not found" });
-        }
+        if (!book) return res.status(404).send({ message: "Book not found" });
 
         res.send(book);
-      } catch (err) {
+      } catch {
         res.status(500).send({ message: "Server error" });
       }
     });
 
-    // ======================
-    // GET USER BOOKS (RESTORED)
-    // ======================
+    // ── GET USER BOOKS ─────────────────────────────────────────────────────
     app.get('/my-books', async (req, res) => {
       try {
         const email = req.query.email;
-
-        if (!email) {
-          return res.status(400).send({ message: "Email required" });
-        }
+        if (!email) return res.status(400).send({ message: "Email required" });
 
         const books = await booksCollection.find({ email }).toArray();
         res.send(books);
-
-      } catch (err) {
+      } catch {
         res.status(500).send({ message: "Failed to fetch user books" });
       }
     });
 
-    // ======================
-    // ADD BOOK (RESTORED)
-    // ======================
+    // ── ADD BOOK ───────────────────────────────────────────────────────────
     app.post('/books', async (req, res) => {
       try {
         const book = req.body;
-
         if (!book.title || !book.imgUrl || !book.email) {
           return res.status(400).send({ message: "Missing fields" });
         }
 
-        const result = await booksCollection.insertOne({
-          ...book,
-          status: "available"
-        });
-
+        const result = await booksCollection.insertOne({ ...book, status: "available" });
         res.status(201).send(result);
-
-      } catch (err) {
+      } catch {
         res.status(500).send({ message: "Failed to add book" });
       }
     });
 
-    // ======================
-    // BORROW BOOK
-    // ======================
+    // ── BORROW BOOK ────────────────────────────────────────────────────────
     app.post('/borrows', async (req, res) => {
       try {
         const {
           bookId,
           bookTitle,
           lenderEmail,
+          lenderName,
           borrowerEmail,
+          borrowerName,
           durationDays,
           durationHours,
-          durationMinutes
+          durationMinutes,
         } = req.body;
 
         if (!bookId || !lenderEmail || !borrowerEmail) {
@@ -174,31 +169,32 @@ async function run() {
         }
 
         const book = await booksCollection.findOne({ _id: new ObjectId(bookId) });
-
         if (!book || book.status !== "available") {
           return res.status(400).send({ message: "Book not available" });
         }
 
         const totalMinutes =
-          (parseInt(durationDays || 0) * 24 * 60) +
-          (parseInt(durationHours || 0) * 60) +
-          parseInt(durationMinutes || 0);
+          (parseInt(durationDays    || 0) * 24 * 60) +
+          (parseInt(durationHours   || 0) * 60) +
+           parseInt(durationMinutes || 0);
 
         if (totalMinutes < 1) {
           return res.status(400).send({ message: "Minimum 1 minute required" });
         }
 
         const borrowedAt = new Date();
-        const dueDate = new Date(borrowedAt.getTime() + totalMinutes * 60000);
+        const dueDate    = new Date(borrowedAt.getTime() + totalMinutes * 60000);
 
         const borrowRecord = {
           bookId: new ObjectId(bookId),
           bookTitle,
           lenderEmail,
+          lenderName:    lenderName    || "Lender",
           borrowerEmail,
+          borrowerName:  borrowerName  || "Borrower",
           borrowedAt,
           dueDate,
-          status: "active"
+          status: "active",
         };
 
         const result = await borrowsCollection.insertOne(borrowRecord);
@@ -208,77 +204,142 @@ async function run() {
           { $set: { status: "unavailable" } }
         );
 
-        // EMAIL
-        if (transporter) {
-          try {
-            await transporter.sendMail({
-              from: '"E-Library" <noreply@elibrary.com>',
-              to: borrowerEmail,
-              subject: `Book Borrowed: ${bookTitle}`,
-              text: `Due: ${dueDate.toLocaleString()}`
-            });
+        const dueDateStr = formatDate(dueDate);
 
-            console.log("📧 Borrow email sent");
-          } catch (e) {
-            console.error("❌ Email failed:", e.message);
-          }
-        }
+        // ── email to LENDER: their book was just borrowed ──────────────────
+        await sendMail(
+          lenderEmail,
+          `📖 Your book "${bookTitle}" has been borrowed`,
+          `
+            <p>Hey <strong>${lenderName || "there"}</strong>,</p>
+            <p>Your book <strong>"${bookTitle}"</strong> has been borrowed by
+            <strong>${borrowerName || borrowerEmail}</strong>.</p>
+            <p>They are expected to return it by:</p>
+            <p style="font-size:16px; font-weight:bold;">${dueDateStr}</p>
+            <p>You'll receive another email once the lending period ends.</p>
+            <br/>
+            <p>— E-Library Team</p>
+          `
+        );
+
+        // ── email to BORROWER: confirm their borrow + return deadline ──────
+        await sendMail(
+          borrowerEmail,
+          `✅ You borrowed "${bookTitle}" — return by ${dueDateStr}`,
+          `
+            <p>Hi <strong>${borrowerName || "there"}</strong>,</p>
+            <p>You have successfully borrowed <strong>"${bookTitle}"</strong>.</p>
+            <p>Please make sure to return it by:</p>
+            <p style="font-size:16px; font-weight:bold;">${dueDateStr}</p>
+            <p>Enjoy your reading! 📚</p>
+            <br/>
+            <p>— E-Library Team</p>
+          `
+        );
 
         res.status(201).send(result);
 
       } catch (err) {
+        console.error(err);
         res.status(500).send({ message: "Borrow failed" });
       }
     });
 
-    // ======================
-    // EXPIRY CHECK
-    // ======================
+    // ── GET ALERTS FOR USER ────────────────────────────────────────────────
+    app.get('/alerts', async (req, res) => {
+      try {
+        const email = req.query.email;
+        if (!email) return res.status(400).send({ message: "Email required" });
+
+        const alerts = await alertsCollection
+          .find({ targetUser: email })
+          .sort({ createdAt: -1 })
+          .limit(20)
+          .toArray();
+
+        res.send(alerts);
+      } catch {
+        res.status(500).send({ message: "Failed to fetch alerts" });
+      }
+    });
+
+    // ── MARK ALERT AS READ ─────────────────────────────────────────────────
+    app.patch('/alerts/:id/read', async (req, res) => {
+      try {
+        if (!ObjectId.isValid(req.params.id)) {
+          return res.status(400).send({ message: "Invalid ID" });
+        }
+        await alertsCollection.updateOne(
+          { _id: new ObjectId(req.params.id) },
+          { $set: { read: true } }
+        );
+        res.send({ ok: true });
+      } catch {
+        res.status(500).send({ message: "Failed to update alert" });
+      }
+    });
+
+    // ── CRON: CHECK EXPIRED BORROWS ────────────────────────────────────────
     const checkExpiredBorrows = async () => {
       try {
         const now = new Date();
 
         const expired = await borrowsCollection.find({
           dueDate: { $lte: now },
-          status: "active"
+          status: "active",
         }).toArray();
 
         for (const b of expired) {
 
+          // in-app alerts for both sides
           await alertsCollection.insertMany([
             {
-              targetUser: b.borrowerEmail,
-              message: `Your book "${b.bookTitle}" expired`,
-              createdAt: new Date()
+              targetUser: b.lenderEmail,
+              message: `The lending period for your book "${b.bookTitle}" has ended. ${b.borrowerName || b.borrowerEmail} is supposed to return it to you.`,
+              type: "lending_expired",
+              read: false,
+              createdAt: new Date(),
             },
             {
-              targetUser: b.lenderEmail,
-              message: `"${b.bookTitle}" returned`,
-              createdAt: new Date()
-            }
+              targetUser: b.borrowerEmail,
+              message: `Your borrowing period for "${b.bookTitle}" has expired. Please return it to ${b.lenderName || b.lenderEmail} as soon as possible.`,
+              type: "return_due",
+              read: false,
+              createdAt: new Date(),
+            },
           ]);
 
-          if (transporter) {
-            try {
-              await transporter.sendMail({
-                from: '"E-Library" <noreply@elibrary.com>',
-                to: b.borrowerEmail,
-                subject: "Expired",
-                text: "Your rental expired"
-              });
+          // ── expiry email to LENDER ────────────────────────────────────────
+          await sendMail(
+            b.lenderEmail,
+            `⏰ Lending period ended — "${b.bookTitle}"`,
+            `
+              <p>Hi <strong>${b.lenderName || "there"}</strong>,</p>
+              <p>The borrowing period for your book <strong>"${b.bookTitle}"</strong> has run out.</p>
+              <p><strong>${b.borrowerName || b.borrowerEmail}</strong> is supposed to return your book to you now.</p>
+              <p>If you haven't heard from them, feel free to reach out at: <a href="mailto:${b.borrowerEmail}">${b.borrowerEmail}</a></p>
+              <br/>
+              <p>— E-Library Team</p>
+            `
+          );
 
-              await transporter.sendMail({
-                from: '"E-Library" <noreply@elibrary.com>',
-                to: b.lenderEmail,
-                subject: "Returned",
-                text: "Book returned"
-              });
+          // ── expiry email to BORROWER ──────────────────────────────────────
+          await sendMail(
+            b.borrowerEmail,
+            `📬 Time's up — please return "${b.bookTitle}"`,
+            `
+              <p>Hi <strong>${b.borrowerName || "there"}</strong>,</p>
+              <p>Your borrowing period for <strong>"${b.bookTitle}"</strong> has officially expired.</p>
+              <p>Please return the book to <strong>${b.lenderName || b.lenderEmail}</strong> as soon as possible.</p>
+              <p>Keeping a borrowed book beyond the agreed time is unfair to the lender who trusted you with it.
+              We kindly urge you to do the right thing — returning it promptly reflects your integrity as a reader
+              and keeps this community a place of trust for everyone. 🙏</p>
+              <br/>
+              <p>— E-Library Team</p>
+            `
+          );
 
-            } catch (e) {
-              console.error("❌ Email error:", e.message);
-            }
-          }
-
+          // mark expired + free the book
           await borrowsCollection.updateOne(
             { _id: b._id },
             { $set: { status: "expired" } }
@@ -296,7 +357,6 @@ async function run() {
     };
 
     cron.schedule("* * * * *", checkExpiredBorrows);
-
     console.log("⏰ Cron running every minute");
 
   } catch (err) {
@@ -304,9 +364,6 @@ async function run() {
   }
 }
 
-// ======================
-// START SERVER (FIXED)
-// ======================
 run()
   .then(() => {
     app.listen(port, () => {
@@ -316,15 +373,4 @@ run()
   })
   .catch(console.dir);
 
-// ROOT
-app.get('/', (req, res) => {
-  res.send("Server running");
-});
-// PORT=5000
-// PASSWORD_DB=mongodb+srv://sussynerd7:sussynerd7@cluster0.07firde.mongodb.net/?appName=Cluster0
-
-// # For Gmail (Recommended - Free)
-// SMTP_HOST=smtp.gmail.com
-// SMTP_PORT=587
-// SMTP_USER=sifatforpc999@gmail.com
-// SMTP_PASS=muyq texz bkql vrup
+app.get('/', (req, res) => res.send("Server running"));
