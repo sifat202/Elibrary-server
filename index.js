@@ -9,8 +9,10 @@ dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 5000;
-
-app.use(cors());
+app.use(cors({
+  origin: 'https://elibrary-d76cc.web.app', // your Firebase frontend URL
+  credentials: true
+}));
 app.use(express.json());
 
 const uri = process.env.PASSWORD_DB;
