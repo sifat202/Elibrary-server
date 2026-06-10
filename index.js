@@ -9,10 +9,10 @@ dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 5000;
-app.use(cors({
-  origin: 'https://elibrary-d76cc.web.app', // your Firebase frontend URL
-  credentials: true
-}));
+
+// ✅ Bulletproof Manual CORS Middleware for Vercel
+app.use(cors({ origin: 'https://elibrary-d76cc.web.app' })); 
+
 app.use(express.json());
 
 const uri = process.env.PASSWORD_DB;
@@ -97,6 +97,9 @@ async function run() {
     const booksCollection  = db.collection("Books");
     const borrowsCollection = db.collection("Borrows");
     const alertsCollection  = db.collection("Alerts");
+
+    // ── ROOT ROUTE ─────────────────────────────────────────────────────────
+    app.get('/', (req, res) => res.send("Server running"));
 
     // ── GET ALL BOOKS ──────────────────────────────────────────────────────
     app.get('/books', async (req, res) => {
@@ -208,7 +211,7 @@ async function run() {
 
         const dueDateStr = formatDate(dueDate);
 
-        // ── email to LENDER: their book was just borrowed ──────────────────
+        // ── email to LENDER ──────────────────
         await sendMail(
           lenderEmail,
           `📖 Your book "${bookTitle}" has been borrowed`,
@@ -224,7 +227,7 @@ async function run() {
           `
         );
 
-        // ── email to BORROWER: confirm their borrow + return deadline ──────
+        // ── email to BORROWER ──────
         await sendMail(
           borrowerEmail,
           `✅ You borrowed "${bookTitle}" — return by ${dueDateStr}`,
@@ -311,7 +314,7 @@ async function run() {
             },
           ]);
 
-          // ── expiry email to LENDER ────────────────────────────────────────
+          // expiry email to LENDER
           await sendMail(
             b.lenderEmail,
             `⏰ Lending period ended — "${b.bookTitle}"`,
@@ -325,7 +328,7 @@ async function run() {
             `
           );
 
-          // ── expiry email to BORROWER ──────────────────────────────────────
+          // expiry email to BORROWER
           await sendMail(
             b.borrowerEmail,
             `📬 Time's up — please return "${b.bookTitle}"`,
@@ -333,9 +336,7 @@ async function run() {
               <p>Hi <strong>${b.borrowerName || "there"}</strong>,</p>
               <p>Your borrowing period for <strong>"${b.bookTitle}"</strong> has officially expired.</p>
               <p>Please return the book to <strong>${b.lenderName || b.lenderEmail}</strong> as soon as possible.</p>
-              <p>Keeping a borrowed book beyond the agreed time is unfair to the lender who trusted you with it.
-              We kindly urge you to do the right thing — returning it promptly reflects your integrity as a reader
-              and keeps this community a place of trust for everyone. 🙏</p>
+              <p>Keeping a borrowed book beyond the agreed time is unfair to the lender who trusted you with it.🙏</p>
               <br/>
               <p>— E-Library Team</p>
             `
@@ -374,5 +375,3 @@ run()
     });
   })
   .catch(console.dir);
-
-app.get('/', (req, res) => res.send("Server running"));
