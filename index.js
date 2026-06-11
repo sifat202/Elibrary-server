@@ -5,7 +5,8 @@ import cors from 'cors';
 import cron from 'node-cron';
 import nodemailer from 'nodemailer';
 
-dotenv.config();
+dotenv.config();//
+//Bismillah
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -133,18 +134,76 @@ async function run() {
     });
 
     // ── GET USER BOOKS ─────────────────────────────────────────────────────
-    app.get('/my-books', async (req, res) => {
-      try {
-        const email = req.query.email;
-        if (!email) return res.status(400).send({ message: "Email required" });
+   // ── GET USER BOOKS WITH ACTIVE BORROWER INFO ─────────────────────────────
+app.get('/my-books', async (req, res) => {
+  try {
+    const email = req.query.email;
+    if (!email) return res.status(400).send({ message: "Email required" });
 
-        const books = await booksCollection.find({ email }).toArray();
-        res.send(books);
-      } catch {
-        res.status(500).send({ message: "Failed to fetch user books" });
-      }
-    });
+    // Aggregation query to join Books with active Borrows entries
+    const booksWithBorrowers = await booksCollection.aggregate([
+      { $match: { email: email } },
+      {
+        $lookup: {
+          from: "Borrows",
+          let: { bookId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$bookId", "$$bookId"] },
+                    { $eq: ["$status", "active"] }
+                  ]
+                }
+              }
+            }
+          ],
+          as: "activeLoan"
+        }
+      },
+      {
+        $addFields: {
+          borrowerEmail: { $arrayElemAt: ["$activeLoan.borrowerEmail", 0] },
+          borrowerName: { $arrayElemAt: ["$activeLoan.borrowerName", 0] }
+        }
+      },
+      { $project: { activeLoan: 0 } } // Clean up temp lookup array
+    ]).toArray();
 
+    res.send(booksWithBorrowers);
+  } catch (err) {
+    console.error("Aggregation Error:", err);
+    res.status(500).send({ message: "Failed to fetch user books" });
+  }
+});
+// ── DELETE SINGLE BOOK ───────────────────────────────────────────────────
+app.delete('/books/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    if (!ObjectId.isValid(id)) return res.status(400).send({ message: "Invalid ID" });
+
+    // Optional: Prevent deletion if the book is currently borrowed
+    const book = await booksCollection.findOne({ _id: new ObjectId(id) });
+    if (book && book.status === "unavailable") {
+      return res.status(400).send({ message: "Cannot delete a book that is currently borrowed." });
+    }
+
+    const result = await booksCollection.deleteOne({ _id: new ObjectId(id) });
+    
+    if (result.deletedCount === 0) {
+      return res.status(404).send({ message: "Book not found" });
+    }
+
+    // Clean up any active borrow tracking entries for this book
+    await borrowsCollection.deleteMany({ bookId: new ObjectId(id) });
+
+    res.send({ message: "Book deleted successfully", deletedCount: result.deletedCount });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ message: "Failed to delete book" });
+  }
+});
     // ── ADD BOOK ───────────────────────────────────────────────────────────
     app.post('/books', async (req, res) => {
       try {
